@@ -2,17 +2,17 @@ const { Cashfree } = require('cashfree-pg');
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
 
-// Initialize Cashfree SDK
+// Direct String Assignment - Avoids the "undefined" Environment error
 Cashfree.XClientId = process.env.CASHFREE_CLIENT_ID;
 Cashfree.XClientSecret = process.env.CASHFREE_CLIENT_SECRET;
-Cashfree.XEnvironment = process.env.CASHFREE_ENV === 'PRODUCTION' 
-    ? Cashfree.Environment.PRODUCTION 
-    : Cashfree.Environment.SANDBOX;
+Cashfree.XEnvironment = process.env.CASHFREE_ENV === "PRODUCTION" 
+    ? "PRODUCTION" 
+    : "SANDBOX";
+
+console.log(`[Cashfree] Initialized in ${Cashfree.XEnvironment} mode`);
 
 /**
  * @desc    Create a payment order
- * @route   POST /api/payments/create-order
- * @access  Private
  */
 const createOrder = async (req, res) => {
     try {
@@ -26,23 +26,21 @@ const createOrder = async (req, res) => {
         const orderId = `order_${Date.now()}_${user._id.toString().slice(-4)}`;
 
         const request = {
-            order_amount: amount,
+            order_amount: parseFloat(amount).toFixed(2),
             order_currency: "INR",
             order_id: orderId,
             customer_details: {
                 customer_id: user._id.toString(),
-                customer_phone: "9999999999", // Replace with user.phone if added to model
+                customer_phone: "9999999999", 
                 customer_email: user.email
             },
             order_meta: {
-                // The URL user is redirected to after payment completion
                 return_url: `http://localhost:3000/payment-verify?order_id=${orderId}`
             }
         };
 
         const response = await Cashfree.PGCreateOrder("2023-08-01", request);
         
-        // Save the pending transaction in our database
         await Transaction.create({
             userId: user._id,
             orderId: orderId,
@@ -62,17 +60,14 @@ const createOrder = async (req, res) => {
 };
 
 /**
- * @desc    Verify Payment Webhook (Security)
- * @route   POST /api/payments/webhook
- * @access  Public (Called by Cashfree)
+ * @desc    Verify Payment Webhook
  */
 const verifyWebhook = async (req, res) => {
     try {
         const signature = req.headers["x-webhook-signature"];
         const timestamp = req.headers["x-webhook-timestamp"];
-        const rawBody = req.rawBody; // Captured in server.js middleware
+        const rawBody = req.rawBody; 
 
-        // 1. Verify the signature to ensure request is from Cashfree
         Cashfree.PGVerifyWebhookSignature(signature, rawBody, timestamp);
 
         const event = JSON.parse(rawBody);
@@ -82,11 +77,9 @@ const verifyWebhook = async (req, res) => {
             const transaction = await Transaction.findOne({ orderId });
 
             if (transaction && transaction.status !== 'SUCCESS') {
-                // Update Transaction Status
                 transaction.status = 'SUCCESS';
                 await transaction.save();
 
-                // 2. Calculate Expiry Date based on planName
                 const startDate = new Date();
                 let endDate = new Date();
 
@@ -94,7 +87,6 @@ const verifyWebhook = async (req, res) => {
                 else if (transaction.planName === 'half-yearly') endDate.setMonth(endDate.getMonth() + 6);
                 else if (transaction.planName === 'yearly') endDate.setFullYear(endDate.getFullYear() + 1);
 
-                // 3. Update User Subscription
                 await User.findByIdAndUpdate(transaction.userId, {
                     subscription: {
                         plan: transaction.planName,
