@@ -1,5 +1,6 @@
 node_modules/
 .env
+.env.example
 
 dist/
 build/
@@ -21,8 +22,3 @@ Thumbs.db
 .vscode/
 .idea/
 
-.env.local
-.env.development
-.env.test
-.env.production
-.env.example
