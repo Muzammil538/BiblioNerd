@@ -1,63 +1,64 @@
-const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs');
+import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
 
-const userSchema = new mongoose.Schema({
-    name: { 
-        type: String, 
-        required: true 
+const subscriptionSchema = new mongoose.Schema(
+  {
+    plan: {
+      type: String,
+      enum: ["none", "monthly", "yearly"],
+      default: "none",
     },
-    email: { 
-        type: String, 
-        required: true, 
-        unique: true,
-        lowercase: true 
+    startDate: { type: Date, default: null },
+    endDate: { type: Date, default: null },
+    isActive: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
+
+const userSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, trim: true },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
     },
-    password: { 
-        type: String, 
-        required: true 
+    phone: {
+      type: String,
+      default: "",
+      trim: true,
     },
-    role: { 
-        type: String, 
-        enum: ['user', 'admin'], 
-        default: 'user' // Default role for everyone who registers
+    password: { type: String, required: true, minlength: 8, select: false },
+    role: {
+      type: String,
+      enum: ["user", "admin"],
+      default: "user",
     },
     subscription: {
-        plan: { 
-            type: String, 
-            enum: ['none', 'monthly', 'half-yearly', 'yearly'], 
-            default: 'none' 
-        },
-        startDate: { type: Date },
-        endDate: { type: Date },
-        isActive: { type: Boolean, default: false }
-    }
-}, { timestamps: true });
+      type: subscriptionSchema,
+      default: () => ({
+        plan: "none",
+        startDate: null,
+        endDate: null,
+        isActive: false,
+      }),
+    },
+  },
+  { timestamps: true }
+);
 
-/**
- * PASSWORD ENCRYPTION LOGIC
- * This middleware runs before every "save" operation.
- */
-userSchema.pre('save', async function (next) {
-    // Only hash the password if it has been modified (or is new)
-    if (!this.isModified('password')) {
-        return next();
-    }
-
-    try {
-        const salt = await bcrypt.genSalt(10);
-        this.password = await bcrypt.hash(this.password, salt);
-        next();
-    } catch (error) {
-        next(error);
-    }
+userSchema.pre("save", async function hashPassword() {
+  if (!this.isModified("password")) {
+    return;
+  }
+  const salt = await bcrypt.genSalt(12);
+  this.password = await bcrypt.hash(this.password, salt);
 });
 
-/**
- * PASSWORD VERIFICATION LOGIC
- * Used during Login to compare entered password with the hashed one.
- */
-userSchema.methods.matchPassword = async function (enteredPassword) {
-    return await bcrypt.compare(enteredPassword, this.password);
+userSchema.methods.matchPassword = async function matchPassword(entered) {
+  return bcrypt.compare(entered, this.password);
 };
 
-module.exports = mongoose.model('User', userSchema);
+export default mongoose.model("User", userSchema);

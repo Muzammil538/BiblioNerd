@@ -1,21 +1,13 @@
-const express = require('express');
-const router = express.Router();
-const { createOrder, verifyWebhook } = require('../controllers/paymentController');
-const { protect } = require('../middleware/authMiddleware');
+import { Router } from "express";
+import {
+  createOrder,
+  getOrderStatus,
+} from "../controllers/paymentController.js";
+import { protect } from "../middleware/auth.js";
 
-/**
- * @route   POST /api/payments/create-order
- * @desc    Initialize a Cashfree payment session
- * @access  Private (Logged-in users only)
- */
-router.post('/create-order', protect, createOrder);
+const router = Router();
 
-/**
- * @route   POST /api/payments/webhook
- * @desc    Receive payment status updates from Cashfree
- * @access  Public (Called by Cashfree API)
- * @note    Security is handled via signature verification in the controller
- */
-router.post('/webhook', verifyWebhook);
+router.post("/create-order", protect, createOrder);
+router.get("/order/:orderId", protect, getOrderStatus);
 
-module.exports = router;
+export default router;

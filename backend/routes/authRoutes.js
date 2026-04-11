@@ -1,32 +1,17 @@
-const express = require('express');
-const router = express.Router();
-const { 
-    registerUser, 
-    authUser, 
-    getUserProfile 
-} = require('../controllers/authController');
-const { protect } = require('../middleware/authMiddleware');
+import { Router } from "express";
+import rateLimit from "express-rate-limit";
+import { register, login } from "../controllers/authController.js";
 
-/**
- * @route   POST /api/auth/register
- * @desc    Register a new user
- * @access  Public
- */
-router.post('/register', registerUser);
+const router = Router();
 
-/**
- * @route   POST /api/auth/login
- * @desc    Authenticate user & get token
- * @access  Public
- */
-router.post('/login', authUser);
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
-/**
- * @route   GET /api/auth/profile
- * @desc    Get user profile data
- * @access  Private
- * @note    The 'protect' middleware ensures only logged-in users reach the controller
- */
-router.get('/profile', protect, getUserProfile);
+router.post("/register", authLimiter, register);
+router.post("/login", authLimiter, login);
 
-module.exports = router;
+export default router;

@@ -1,13 +1,18 @@
-const mongoose = require('mongoose');
+import mongoose from "mongoose";
 
-const bookSchema = new mongoose.Schema({
-    title: { type: String, required: true },
-    author: { type: String, required: true },
-    description: { type: String, required: true },
-    coverImage: { type: String, required: true }, // Cloudinary Image URL
-    pdfUrl: { type: String, required: true },     // Cloudinary PDF URL
-    category: { type: String, default: 'General' },
-    isPremium: { type: Boolean, default: true }
-}, { timestamps: true });
+const bookSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    author: { type: String, required: true, trim: true },
+    description: { type: String, default: "", trim: true },
+    category: { type: String, required: true, trim: true, index: true },
+    pdfUrl: { type: String, required: true },
+    coverImageUrl: { type: String, required: true },
+    pdfPublicId: { type: String, required: true },
+    coverPublicId: { type: String, required: true },
+    trendingScore: { type: Number, default: 0, index: true },
+  },
+  { timestamps: true }
+);
 
-module.exports = mongoose.model('Book', bookSchema);
+export default mongoose.model("Book", bookSchema);

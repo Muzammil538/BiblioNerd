@@ -1,1 +1,101 @@
 @import "tailwindcss";
+
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+  body {
+    @apply bg-[#f7f4ee] text-[#1a1a1a] font-serif;
+    font-feature-settings: "kern" 1, "liga" 1;
+  }
+}
+
+@layer utilities {
+  .reader-paper {
+    background: linear-gradient(180deg, #fdfbf7 0%, #f4efe6 100%);
+  }
+
+  .no-screenshot {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+  }
+}
+
+:root[data-theme="dark"] body {
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] header {
+  background: rgba(15, 23, 42, 0.95);
+  border-color: #334155;
+}
+
+:root[data-theme="dark"] footer {
+  background: #0f172a;
+  color: #cbd5e1;
+}
+
+:root[data-theme="dark"] .reader-paper {
+  background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+}
+
+/* Global dark mode overrides to fix hardcoded light-mode tailwind classes across all pages */
+:root[data-theme="dark"] .bg-white {
+  background-color: #1e293b;
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .bg-\[\#ebe6dc\] {
+  background-color: #334155;
+}
+
+:root[data-theme="dark"] .text-\[\#1a1a1a\] {
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .text-\[\#5c574c\] {
+  color: #cbd5e1;
+}
+
+:root[data-theme="dark"] .text-\[\#7a7265\] {
+  color: #94a3b8;
+}
+
+:root[data-theme="dark"] .border-\[\#d8d0c4\],
+:root[data-theme="dark"] .border-\[\#e3ddd0\] {
+  border-color: #334155;
+}
+
+:root[data-theme="dark"] .bg-\[\#1a1a1a\] {
+  background-color: #3b82f6;
+  color: #ffffff;
+}
+
+:root[data-theme="dark"] .bg-\[\#1a1a1a\]:hover {
+  background-color: #2563eb;
+}
+
+:root[data-theme="dark"] .border-\[\#1a1a1a\] {
+  border-color: #f8fafc;
+  color: #f8fafc;
+}
+
+:root[data-theme="dark"] .border-\[\#1a1a1a\]:hover {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] textarea,
+:root[data-theme="dark"] select {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
+  border-color: #334155 !important;
+}
+
+:root[data-theme="dark"] .focus\:ring-\[\#1a1a1a\]:focus {
+  --tw-ring-color: #94a3b8;
+}

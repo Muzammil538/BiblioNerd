@@ -7,3 +7,17 @@ build/
 APIKey.csv
 
 backend.png
+
+.DS_store
+DS_Store
+Thumbs.db
+
+# Ignore log files and temp files
+*.log
+*.tmp
+*.temp
+
+# Ignore IDE specific files
+.vscode/
+.idea/
+

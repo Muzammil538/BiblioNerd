@@ -1,111 +1,270 @@
-const { Cashfree } = require('cashfree-pg');
-const User = require('../models/User');
-const Transaction = require('../models/Transaction');
+import crypto from "crypto";
+import { getCashfreeClient } from "../config/cashfree.js";
+import Transaction from "../models/Transaction.js";
+import User from "../models/User.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
 
-// Direct String Assignment - Avoids the "undefined" Environment error
-Cashfree.XClientId = process.env.CASHFREE_CLIENT_ID;
-Cashfree.XClientSecret = process.env.CASHFREE_CLIENT_SECRET;
-Cashfree.XEnvironment = process.env.CASHFREE_ENV === "PRODUCTION" 
-    ? "PRODUCTION" 
-    : "SANDBOX";
+const PLAN_PRICES_INR = {
+  monthly: 299,
+  yearly: 2499,
+};
 
-console.log(`[Cashfree] Initialized in ${Cashfree.XEnvironment} mode`);
+function computeSubscriptionWindow(user, plan) {
+  const now = new Date();
+  const prev = user.subscription || {};
+  const days = plan === "yearly" ? 365 : 30;
+  const currentEnd = prev.endDate ? new Date(prev.endDate) : null;
+  const base =
+    prev.isActive && currentEnd && currentEnd > now ? currentEnd : now;
+  const endDate = new Date(base);
+  endDate.setDate(endDate.getDate() + days);
+  const startDate =
+    prev.startDate && prev.isActive && currentEnd && currentEnd > now
+      ? prev.startDate
+      : now;
+  return {
+    plan,
+    startDate,
+    endDate,
+    isActive: true,
+  };
+}
 
-/**
- * @desc    Create a payment order
- */
-const createOrder = async (req, res) => {
-    try {
-        const { amount, planName } = req.body;
-        const user = await User.findById(req.user._id);
+function getOrderIdFromPayload(data) {
+  return (
+    data?.order?.order_id ||
+    data?.payment?.order_id ||
+    data?.order_id ||
+    data?.transaction?.order_id ||
+    data?.orderId ||
+    null
+  );
+}
 
-        if (!user) {
-            return res.status(404).json({ message: 'User not found' });
-        }
+function normalizeProviderStatus(provider) {
+  const status =
+    provider?.order_status ||
+    provider?.order?.order_status ||
+    provider?.order?.status ||
+    provider?.status ||
+    provider?.payment_status ||
+    provider?.order?.payment_status ||
+    provider?.transaction?.order_status ||
+    provider?.transaction?.status ||
+    provider?.data?.order_status ||
+    provider?.data?.payment_status ||
+    "";
+  return String(status).trim().toUpperCase();
+}
 
-        const orderId = `order_${Date.now()}_${user._id.toString().slice(-4)}`;
+function providerIsPaid(provider) {
+  const status = normalizeProviderStatus(provider);
+  return ["PAID", "SUCCESS", "COMPLETED"].includes(status);
+}
 
-        const request = {
-            order_amount: parseFloat(amount).toFixed(2),
-            order_currency: "INR",
-            order_id: orderId,
-            customer_details: {
-                customer_id: user._id.toString(),
-                customer_phone: "9999999999", 
-                customer_email: user.email
-            },
-            order_meta: {
-                return_url: `http://localhost:3000/payment-verify?order_id=${orderId}`
-            }
-        };
+function providerIsFailed(provider) {
+  const status = normalizeProviderStatus(provider);
+  return ["FAILED", "DECLINED", "CANCELLED", "ERROR"].includes(status);
+}
 
-        const response = await Cashfree.PGCreateOrder("2023-08-01", request);
-        
-        await Transaction.create({
-            userId: user._id,
-            orderId: orderId,
-            paymentSessionId: response.data.payment_session_id,
-            amount: amount,
-            planName: planName,
-            status: 'PENDING'
-        });
+async function syncPaidTransaction(transaction, providerSource) {
+  transaction.status = "paid";
+  transaction.cfPaymentId =
+    providerSource?.payment?.cf_payment_id ||
+    providerSource?.payment?.payment_id ||
+    providerSource?.payment_id ||
+    providerSource?.transaction?.payment_id ||
+    providerSource?.transaction?.cf_payment_id ||
+    transaction.cfPaymentId ||
+    null;
+  transaction.rawWebhook = transaction.rawWebhook || { providerOrder: providerSource };
+  await transaction.save();
 
-        res.status(200).json(response.data);
-    } catch (error) {
-        console.error("Cashfree Error:", error.response?.data || error.message);
-        res.status(500).json({ 
-            message: error.response?.data?.message || "Could not create payment order" 
-        });
+  const user =
+    transaction.user && transaction.user._id
+      ? transaction.user
+      : await User.findById(transaction.user);
+  if (user) {
+    user.subscription = computeSubscriptionWindow(user, transaction.plan);
+    await user.save();
+  }
+}
+
+export const createOrder = asyncHandler(async (req, res) => {
+  const cf = getCashfreeClient();
+  const { plan, customerPhone } = req.body;
+  if (plan !== "monthly" && plan !== "yearly") {
+    return res.status(400).json({ message: "Plan must be monthly or yearly" });
+  }
+  const amount = PLAN_PRICES_INR[plan];
+  const orderId = `bn_${Date.now()}_${crypto.randomBytes(6).toString("hex")}`;
+  const frontend = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
+  const returnUrl = `${frontend}/payment/return?order_id={order_id}`;
+  const notifyHost = process.env.PUBLIC_API_URL || `http://localhost:${process.env.PORT || 5000}`;
+  const notifyUrl = `${notifyHost}/api/payments/webhook`;
+
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  await Transaction.create({
+    orderId,
+    amount,
+    currency: "INR",
+    status: "created",
+    user: user._id,
+    plan,
+  });
+
+  const phone =
+    (customerPhone && String(customerPhone).replace(/\D/g, "").slice(-10)) ||
+    (user.phone && user.phone.replace(/\D/g, "").slice(-10)) ||
+    "9999999999";
+
+  const request = {
+    order_amount: amount,
+    order_currency: "INR",
+    order_id: orderId,
+    customer_details: {
+      customer_id: user._id.toString(),
+      customer_email: user.email,
+      customer_phone: phone.length === 10 ? phone : "9999999999",
+      customer_name: user.name,
+    },
+    order_meta: {
+      return_url: returnUrl,
+      notify_url: notifyUrl,
+    },
+  };
+
+  try {
+    const response = await cf.PGCreateOrder(request);
+    const data = response.data || response;
+    const paymentSessionId =
+      data.payment_session_id || data.paymentSessionId || data?.payment_session?.id;
+    if (!paymentSessionId) {
+      return res.status(502).json({
+        message: "Payment provider did not return a session",
+        provider: data,
+      });
     }
-};
+    return res.status(201).json({
+      orderId,
+      paymentSessionId,
+      amount,
+      currency: "INR",
+      plan,
+    });
+  } catch (err) {
+    await Transaction.findOneAndUpdate(
+      { orderId },
+      { status: "failed", rawWebhook: { message: err?.message, body: err?.response?.data } }
+    );
+    const msg =
+      err?.response?.data?.message ||
+      err?.message ||
+      "Unable to create payment order";
+    return res.status(502).json({ message: msg });
+  }
+});
 
-/**
- * @desc    Verify Payment Webhook
- */
-const verifyWebhook = async (req, res) => {
-    try {
-        const signature = req.headers["x-webhook-signature"];
-        const timestamp = req.headers["x-webhook-timestamp"];
-        const rawBody = req.rawBody; 
+export const webhook = asyncHandler(async (req, res) => {
+  const cf = getCashfreeClient();
+  const signature = req.headers["x-webhook-signature"];
+  const timestamp = req.headers["x-webhook-timestamp"];
+  const rawBody =
+    typeof req.body === "string"
+      ? req.body
+      : Buffer.isBuffer(req.body)
+        ? req.body.toString("utf8")
+        : JSON.stringify(req.body);
 
-        Cashfree.PGVerifyWebhookSignature(signature, rawBody, timestamp);
+  if (!signature || !timestamp) {
+    return res.status(400).json({ message: "Missing webhook signature headers" });
+  }
 
-        const event = JSON.parse(rawBody);
+  let event;
+  try {
+    event = cf.PGVerifyWebhookSignature(signature, rawBody, timestamp);
+  } catch (e) {
+    return res.status(400).json({ message: "Invalid webhook signature" });
+  }
 
-        if (event.type === "PAYMENT_SUCCESS_WEBHOOK") {
-            const orderId = event.data.order.order_id;
-            const transaction = await Transaction.findOne({ orderId });
+  const payload = event.object;
+  const type = payload?.type || payload?.event || "";
+  const data = payload.data || payload || {};
+  const orderId = getOrderIdFromPayload(data);
 
-            if (transaction && transaction.status !== 'SUCCESS') {
-                transaction.status = 'SUCCESS';
-                await transaction.save();
+  if (!orderId) {
+    return res.status(200).json({ received: true, ignored: true });
+  }
 
-                const startDate = new Date();
-                let endDate = new Date();
+  const transaction = await Transaction.findOne({ orderId });
+  if (!transaction) {
+    return res.status(200).json({ received: true, unknownOrder: orderId });
+  }
 
-                if (transaction.planName === 'monthly') endDate.setMonth(endDate.getMonth() + 1);
-                else if (transaction.planName === 'half-yearly') endDate.setMonth(endDate.getMonth() + 6);
-                else if (transaction.planName === 'yearly') endDate.setFullYear(endDate.getFullYear() + 1);
+  const isSuccessEvent =
+    type === "PAYMENT_SUCCESS_WEBHOOK" ||
+    type === "ORDER_PAYMENT_SUCCESS" ||
+    type === "PAYMENT_COMPLETED" ||
+    providerIsPaid(data);
 
-                await User.findByIdAndUpdate(transaction.userId, {
-                    subscription: {
-                        plan: transaction.planName,
-                        startDate: startDate,
-                        endDate: endDate,
-                        isActive: true
-                    }
-                });
-            }
-        }
+  const isFailureEvent =
+    type === "PAYMENT_FAILED_WEBHOOK" ||
+    type === "ORDER_PAYMENT_FAILED" ||
+    type === "PAYMENT_FAILED" ||
+    providerIsFailed(data);
 
-        res.status(200).send("Webhook Processed");
-    } catch (err) {
-        console.error("Webhook Verification Error:", err.message);
-        res.status(400).send("Verification Failed");
+  if (isSuccessEvent) {
+    if (transaction.status !== "paid") {
+      await syncPaidTransaction(transaction, data);
+      transaction.rawWebhook = payload;
+      await transaction.save();
     }
-};
+    return res.status(200).json({ received: true, idempotent: true });
+  }
 
-module.exports = {
-    createOrder,
-    verifyWebhook
-};
+  if (isFailureEvent) {
+    await Transaction.findOneAndUpdate(
+      { orderId },
+      { status: "failed", rawWebhook: payload }
+    );
+  }
+
+  return res.status(200).json({ received: true });
+});
+
+export const getOrderStatus = asyncHandler(async (req, res) => {
+  const cf = getCashfreeClient();
+  const { orderId } = req.params;
+  const transaction = await Transaction.findOne({ orderId }).populate(
+    "user",
+    "name email subscription"
+  );
+  if (!transaction) {
+    return res.status(404).json({ message: "Order not found" });
+  }
+  const ownerId =
+    transaction.user?._id?.toString() || transaction.user?.toString();
+  if (ownerId !== req.user._id.toString()) {
+    return res.status(403).json({ message: "Not allowed to view this order" });
+  }
+  let provider = null;
+  try {
+    const response = await cf.PGFetchOrder(orderId);
+    provider = response.data || response;
+  } catch {
+    provider = null;
+  }
+
+  if (provider && transaction.status !== "paid" && providerIsPaid(provider)) {
+    await syncPaidTransaction(transaction, provider);
+  }
+
+  return res.json({
+    transaction,
+    provider,
+  });
+});

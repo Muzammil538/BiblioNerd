@@ -1,63 +1,73 @@
-const express = require('express');
-const dotenv = require('dotenv');
-const cors = require('cors');
-const connectDB = require('./config/db');
-const { notFound, errorHandler } = require('./middleware/errorMiddleware');
-
-// 1. Load environment variables
-dotenv.config();
-
-// 2. Connect to MongoDB
-connectDB();
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import mongoose from "mongoose";
+import { connectDb } from "./config/db.js";
+import { configureCloudinary } from "./config/cloudinary.js";
+import authRoutes from "./routes/authRoutes.js";
+import bookRoutes from "./routes/bookRoutes.js";
+import paymentRoutes from "./routes/paymentRoutes.js";
+import { webhook } from "./controllers/paymentController.js";
+import { protect } from "./middleware/auth.js";
+import { getMe } from "./controllers/authController.js";
 
 const app = express();
-
-/**
- * 3. Middleware Setup
- */
-app.use(cors());
-
-// Special Middleware for Cashfree: 
-// We need the raw body to verify webhook signatures.
-app.use(express.json({
-    verify: (req, res, buf) => {
-        if (req.originalUrl.includes('/api/payments/webhook')) {
-            req.rawBody = buf.toString();
-        }
-    }
-}));
-
-/**
- * 4. Routes
- */
-app.use('/api/auth', require('./routes/authRoutes'));
-app.use('/api/books', require('./routes/bookRoutes'));
-app.use('/api/payments', require('./routes/paymentRoutes'));
-
-// Basic Root Route for API Status
-app.get('/', (req, res) => {
-    res.send('E-Book Subscription API is running...');
-});
-
-/**
- * 5. Error Handling Middleware
- * (Must be defined after all routes)
- */
-app.use(notFound);
-app.use(errorHandler);
-
-/**
- * 6. Start Server
- */
 const PORT = process.env.PORT || 5000;
 
-const server = app.listen(PORT, () => {
-    console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+app.use(
+  cors({
+    origin: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
+    credentials: true,
+  })
+);
+
+app.post(
+  "/api/payments/webhook",
+  express.raw({ type: "application/json" }),
+  webhook
+);
+
+app.use(express.json({ limit: "1mb" }));
+
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, service: "biblionerd-api" });
 });
 
-// Handle unhandled promise rejections (e.g. DB connection issues)
-process.on('unhandledRejection', (err, promise) => {
-    console.log(`Error: ${err.message}`);
-    // Close server & exit process
-    server.close(() => process.exit(1));
+app.get("/api/auth/me", protect, getMe);
+app.use("/api/auth", authRoutes);
+app.use("/api/books", bookRoutes);
+app.use("/api/payments", paymentRoutes);
+
+app.use((req, res) => {
+  res.status(404).json({
+    message: `Cannot ${req.method} ${req.originalUrl}`,
+    hint: "BiblioNerd API expects paths under /api/auth, /api/books, /api/payments",
+  });
+});
+
+app.use((err, _req, res, _next) => {
+  console.error("Unhandled server error:", err);
+  const status = err.statusCode || 500;
+  const message = err.message || "Server error";
+  res.status(status).json({ message });
+});
+
+async function start() {
+  configureCloudinary();
+  await connectDb();
+  console.log("MongoDB Connected.");
+  app.listen(PORT, () => {
+    console.log(`BiblioNerd API listening on port ${PORT}`);
+  });
+}
+
+mongoose.connection.on("disconnected", () => {
+  console.log("MongoDB disconnected");
+});
+
+start().catch((err) => {
+  console.error("Failed to start server:", err.message);
+  process.exit(1);
 });
