@@ -3,10 +3,11 @@ import api from "../../services/api.js";
 
 export const fetchBooks = createAsyncThunk(
   "books/fetchBooks",
-  async ({ category = "all", search = "" } = {}, { rejectWithValue }) => {
+  async ({ category = "all", search = "", accessType = "all" } = {}, { rejectWithValue }) => {
     try {
       const params = new URLSearchParams();
       if (category && category !== "all") params.set("category", category);
+      if (accessType && accessType !== "all") params.set("accessType", accessType);
       if (search) params.set("search", search);
       const qs = params.toString();
       const { data } = await api.get(`/books${qs ? `?${qs}` : ""}`);

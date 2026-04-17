@@ -47,6 +47,9 @@ export const login = asyncHandler(async (req, res) => {
   if (!user) {
     return res.status(401).json({ message: "Invalid credentials" });
   }
+  if (user.isBlocked) {
+    return res.status(403).json({ message: "Your account has been blocked" });
+  }
   const match = await user.matchPassword(password);
   if (!match) {
     return res.status(401).json({ message: "Invalid credentials" });

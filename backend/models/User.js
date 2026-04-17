@@ -45,6 +45,14 @@ const userSchema = new mongoose.Schema(
         isActive: false,
       }),
     },
+    isBlocked: { type: Boolean, default: false },
+    recentlyViewed: [
+      {
+        bookId: { type: mongoose.Schema.Types.ObjectId, ref: "Book", required: true },
+        viewedAt: { type: Date, default: Date.now },
+      }
+    ],
+    favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: "Book" }],
   },
   { timestamps: true }
 );

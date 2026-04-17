@@ -268,3 +268,9 @@ export const getOrderStatus = asyncHandler(async (req, res) => {
     provider,
   });
 });
+
+export const getTransactions = asyncHandler(async (req, res) => {
+  const transactions = await Transaction.find().populate("user", "name email").sort({ createdAt: -1 });
+  res.json({ transactions });
+});
+

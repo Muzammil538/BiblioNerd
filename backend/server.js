@@ -36,7 +36,10 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.get("/api/auth/me", protect, getMe);
+import userRoutes from "./routes/userRoutes.js";
+
 app.use("/api/auth", authRoutes);
+app.use("/api/users", userRoutes);
 app.use("/api/books", bookRoutes);
 app.use("/api/payments", paymentRoutes);
 

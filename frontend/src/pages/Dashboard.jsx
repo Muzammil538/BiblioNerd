@@ -17,23 +17,56 @@ function formatDate(value) {
 export default function Dashboard() {
   const dispatch = useDispatch();
   const { user } = useSelector((state) => state.auth);
-  const { items, status: booksStatus, error: booksError } = useSelector(
+  const { items: allBooks, status: booksStatus, error: booksError } = useSelector(
     (state) => state.books
   );
+  
   const [activeTab, setActiveTab] = useState("profile");
   const [message, setMessage] = useState(null);
   const [error, setError] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  
+  const [favorites, setFavorites] = useState([]);
+  const [recent, setRecent] = useState([]);
+  const [loadingLocal, setLoadingLocal] = useState(false);
 
   useEffect(() => {
     dispatch(fetchMe());
   }, [dispatch]);
 
   useEffect(() => {
-    if (activeTab === "books" || activeTab === "recent") {
+    if (activeTab === "books") {
       dispatch(fetchBooks({ category: "all" }));
+    } else if (activeTab === "favorites") {
+      loadFavorites();
+    } else if (activeTab === "recent") {
+      loadRecent();
     }
   }, [dispatch, activeTab]);
+
+  async function loadFavorites() {
+    setLoadingLocal(true);
+    try {
+      const { data } = await api.get("/users/favorites");
+      setFavorites(Array.isArray(data.favorites) ? data.favorites : []);
+    } catch (err) {
+      setError("Failed to load favorites");
+    } finally {
+      setLoadingLocal(false);
+    }
+  }
+
+  async function loadRecent() {
+    setLoadingLocal(true);
+    try {
+      const { data } = await api.get("/users/recently-viewed");
+      setRecent(Array.isArray(data.recentlyViewed) ? data.recentlyViewed : []);
+    } catch (err) {
+      setError("Failed to load recent books");
+    } finally {
+      setLoadingLocal(false);
+    }
+  }
 
   const sub = user?.subscription;
   const isAdmin = user?.role === "admin";
@@ -45,7 +78,8 @@ export default function Dashboard() {
       ]
     : [
         { key: "profile", label: "Profile" },
-        { key: "recent", label: "Recent books" },
+        { key: "favorites", label: "Favorites" },
+        { key: "recent", label: "Recently viewed" },
       ];
 
   async function handleDelete(bookId) {
@@ -68,47 +102,50 @@ export default function Dashboard() {
     }
   }
 
-  const renderBookList = () => {
-    if (booksStatus === "loading") {
+  const renderBookGrid = (listType, books) => {
+    if (listType === "books" && booksStatus === "loading") {
       return <p className="text-sm text-[#7a7265]">Loading books…</p>;
     }
-    if (booksError) {
-      return <p className="text-sm text-red-800">{booksError}</p>;
+    if (loadingLocal) {
+      return <p className="text-sm text-[#7a7265]">Loading…</p>;
     }
-    if (!items?.length) {
-      return <p className="text-sm text-[#7a7265]">No books are available yet.</p>;
+    if ((listType === "books" && booksError) || error) {
+      return <p className="text-sm text-red-800">{booksError || error}</p>;
+    }
+    if (!books?.length) {
+      return <p className="text-sm text-[#7a7265]">No books are available here yet.</p>;
     }
     return (
       <div className="space-y-4">
-        {items.map((book) => (
+        {books.map((book) => (
           <div
             key={book._id}
             className="rounded-2xl border border-[#e3ddd0] bg-[#f7f4ee] p-4"
           >
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="text-sm text-[#7a7265]">{book.category}</p>
+                <p className="text-sm text-[#7a7265] uppercase tracking-wider text-[10px]">{book.category}</p>
                 <h3 className="text-lg font-medium">{book.title}</h3>
                 <p className="text-sm text-[#5c574c]">{book.author}</p>
               </div>
-              {isAdmin && activeTab === "books" && (
-                <div className="flex flex-wrap gap-2">
-                  <Link
-                    to={`/read/${book._id}`}
-                    className="inline-flex items-center gap-2 rounded-full border border-[#d8d0c4] bg-white px-3 py-2 text-sm hover:bg-[#f4efe6]"
-                  >
-                    View
-                  </Link>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  to={`/book/${book._id}`}
+                  className="inline-flex items-center gap-2 rounded-full border border-[#d8d0c4] bg-white px-3 py-2 text-sm hover:bg-[#f4efe6] transition-colors"
+                >
+                  View Details
+                </Link>
+                {isAdmin && activeTab === "books" && (
                   <button
                     type="button"
                     onClick={() => handleDelete(book._id)}
                     disabled={deletingId === book._id}
-                    className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100 disabled:opacity-60"
+                    className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100 disabled:opacity-60 transition-colors"
                   >
                     {deletingId === book._id ? "Deleting…" : "Delete"}
                   </button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         ))}
@@ -129,7 +166,11 @@ export default function Dashboard() {
             <button
               key={tab.key}
               type="button"
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => {
+                setActiveTab(tab.key);
+                setError(null);
+                setMessage(null);
+              }}
               className={`rounded-full px-4 py-2 text-sm transition-colors ${
                 activeTab === tab.key
                   ? "bg-[#1a1a1a] text-[#fdfbf7]"
@@ -187,22 +228,24 @@ export default function Dashboard() {
             </div>
           )}
 
-          {(activeTab === "books" || activeTab === "recent") && (
+          {activeTab === "books" && (
             <div className="rounded-2xl border border-[#e3ddd0] bg-white p-6">
-              <h2 className="text-xl font-semibold">
-                {activeTab === "books" ? "All books" : "Recent books"}
-              </h2>
-              {message && (
-                <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800 border border-emerald-100">
-                  {message}
-                </p>
-              )}
-              {error && (
-                <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800 border border-red-100">
-                  {error}
-                </p>
-              )}
-              <div className="mt-6">{renderBookList()}</div>
+              <h2 className="text-xl font-semibold">All books</h2>
+              <div className="mt-6">{renderBookGrid("books", allBooks)}</div>
+            </div>
+          )}
+
+          {activeTab === "favorites" && (
+            <div className="rounded-2xl border border-[#e3ddd0] bg-white p-6">
+              <h2 className="text-xl font-semibold">Favorites / Wishlist</h2>
+              <div className="mt-6">{renderBookGrid("favorites", favorites)}</div>
+            </div>
+          )}
+
+          {activeTab === "recent" && (
+            <div className="rounded-2xl border border-[#e3ddd0] bg-white p-6">
+              <h2 className="text-xl font-semibold">Recently viewed books</h2>
+              <div className="mt-6">{renderBookGrid("recent", recent)}</div>
             </div>
           )}
 
@@ -210,13 +253,13 @@ export default function Dashboard() {
             <div className="rounded-2xl border border-[#e3ddd0] bg-white p-6 space-y-4">
               <h2 className="text-xl font-semibold">Upload book</h2>
               <p className="text-sm text-[#5c574c]">
-                Use the admin upload page to add a new title to the library.
+                Use the admin panel to add a new title to the library.
               </p>
               <Link
                 to="/admin"
-                className="inline-flex items-center justify-center rounded-full bg-[#1a1a1a] px-5 py-3 text-sm text-[#fdfbf7] hover:bg-black"
+                className="inline-flex items-center justify-center rounded-full bg-[#1a1a1a] px-5 py-3 text-sm text-[#fdfbf7] hover:bg-black transition-colors"
               >
-                Go to upload page
+                Go to admin page
               </Link>
             </div>
           )}

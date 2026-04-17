@@ -8,6 +8,8 @@ import {
   updateBook,
   signedReaderUrl,
   deleteBook,
+  addReview,
+  getAnalytics,
 } from "../controllers/bookController.js";
 import { protect, admin } from "../middleware/auth.js";
 import { uploadBookFields } from "../middleware/upload.js";
@@ -15,11 +17,13 @@ import { uploadBookFields } from "../middleware/upload.js";
 const router = Router();
 
 router.get("/trending", trendingBooks);
+router.get("/analytics", protect, admin, getAnalytics);
 router.get("/categories/list", categories);
 router.get("/book-categories", categories);
 router.get("/:id/read", protect, signedReaderUrl);
 router.get("/:id", getBook);
 router.get("/", listBooks);
+router.post("/:id/reviews", protect, addReview);
 
 router.post(
   "/",

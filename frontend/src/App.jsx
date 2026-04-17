@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { fetchMe } from "./features/auth/authSlice.js";
@@ -12,21 +12,12 @@ import Payment from "./pages/Payment.jsx";
 import PaymentReturn from "./pages/PaymentReturn.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import AdminPanel from "./pages/AdminPanel.jsx";
+import BookDetails from "./pages/BookDetails.jsx";
 import BookReader from "./pages/BookReader.jsx";
 
 export default function App() {
   const dispatch = useDispatch();
   const token = useSelector((state) => state.auth.token);
-  const [theme, setTheme] = useState("light");
-
-  useEffect(() => {
-    const stored = localStorage.getItem("biblionerd-theme");
-    if (stored === "dark" || stored === "light") {
-      setTheme(stored);
-    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      setTheme("dark");
-    }
-  }, []);
 
   useEffect(() => {
     if (token) {
@@ -34,22 +25,14 @@ export default function App() {
     }
   }, [dispatch, token]);
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem("biblionerd-theme", theme);
-  }, [theme]);
-
-  const toggleTheme = () => {
-    setTheme((current) => (current === "dark" ? "light" : "dark"));
-  };
-
   return (
-    <Layout theme={theme} onToggleTheme={toggleTheme}>
+    <Layout>
       <Routes>
         <Route
           path="/"
           element={<Home />}
         />
+        <Route path="/book/:id" element={<BookDetails />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/pricing" element={<Payment />} />

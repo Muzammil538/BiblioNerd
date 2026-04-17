@@ -1,4 +1,6 @@
 import Book from "../models/Book.js";
+import User from "../models/User.js";
+import Transaction from "../models/Transaction.js";
 import { cloudinary } from "../config/cloudinary.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
@@ -24,10 +26,13 @@ function assertActiveSubscription(user) {
 }
 
 export const listBooks = asyncHandler(async (req, res) => {
-  const { category, search } = req.query;
+  const { category, search, accessType } = req.query;
   const filter = {};
   if (category && category !== "all") {
     filter.category = category;
+  }
+  if (accessType && accessType !== "all") {
+    filter.accessType = accessType;
   }
   if (search) {
     filter.$or = [
@@ -66,7 +71,7 @@ export const createBook = asyncHandler(async (req, res) => {
   if (!cover || !pdf) {
     return res.status(400).json({ message: "Cover image and PDF are required" });
   }
-  const { title, author, description, category, trendingScore } = req.body;
+  const { title, author, description, category, trendingScore, accessType } = req.body;
   if (!title || !author || !category) {
     return res.status(400).json({ message: "Title, author, and category are required" });
   }
@@ -83,6 +88,7 @@ export const createBook = asyncHandler(async (req, res) => {
     coverImageUrl: coverUrl,
     pdfPublicId,
     coverPublicId,
+    accessType: accessType || "premium",
     trendingScore:
       trendingScore !== undefined && trendingScore !== ""
         ? Number(trendingScore) || 0
@@ -101,7 +107,7 @@ export const updateBook = asyncHandler(async (req, res) => {
     return res.status(404).json({ message: "Book not found" });
   }
 
-  const { title, author, description, category, trendingScore } = req.body;
+  const { title, author, description, category, trendingScore, accessType } = req.body;
   if (!title || !author || !category) {
     return res.status(400).json({ message: "Title, author, and category are required" });
   }
@@ -110,6 +116,7 @@ export const updateBook = asyncHandler(async (req, res) => {
   book.author = author;
   book.description = description || "";
   book.category = category;
+  book.accessType = accessType || book.accessType;
   book.trendingScore = trendingScore !== undefined && trendingScore !== "" ? Number(trendingScore) || 0 : book.trendingScore;
 
   await book.save();
@@ -121,13 +128,19 @@ export const signedReaderUrl = asyncHandler(async (req, res) => {
   if (!isValidObjectId(req.params.id)) {
     return res.status(400).json({ message: "Invalid book id" });
   }
-  if (!assertActiveSubscription(req.user)) {
-    return res.status(403).json({ message: "An active subscription is required to read books" });
-  }
+
   const book = await Book.findById(req.params.id);
   if (!book) {
     return res.status(404).json({ message: "Book not found" });
   }
+
+  const isFree = book.accessType && book.accessType.toLowerCase() === "free";
+  const isAdmin = req.user && req.user.role === "admin";
+
+  if (!isFree && !isAdmin && !assertActiveSubscription(req.user)) {
+    return res.status(403).json({ message: "An active subscription is required to read premium books" });
+  }
+
   const expiresAt = Math.floor(Date.now() / 1000) + 15 * 60;
   const pdfSigned = cloudinary.url(book.pdfPublicId, {
     resource_type: "raw",
@@ -166,4 +179,43 @@ export const deleteBook = asyncHandler(async (req, res) => {
   }
   await book.deleteOne();
   return res.json({ message: "Book removed" });
+});
+
+export const addReview = asyncHandler(async (req, res) => {
+  const { rating, comment } = req.body;
+  const bookId = req.params.id;
+  const book = await Book.findById(bookId);
+  if (!book) return res.status(404).json({ message: "Book not found" });
+
+  const existingReview = book.reviews.find(r => r.user.toString() === req.user._id.toString());
+  if (existingReview) {
+    existingReview.rating = Number(rating);
+    existingReview.comment = comment;
+  } else {
+    book.reviews.push({
+      user: req.user._id,
+      name: req.user.name,
+      rating: Number(rating),
+      comment: comment || "",
+    });
+  }
+  await book.save();
+  res.status(201).json({ message: "Review added", reviews: book.reviews });
+});
+
+export const getAnalytics = asyncHandler(async (req, res) => {
+  const totalUsers = await User.countDocuments();
+  const activeSubscriptions = await User.countDocuments({ "subscription.isActive": true });
+  const totalBooks = await Book.countDocuments();
+  
+  const transactions = await Transaction.find({ status: "paid" });
+  let totalRevenue = 0;
+  transactions.forEach(t => { totalRevenue += t.amount || 0 });
+
+  res.json({
+    totalUsers,
+    activeSubscriptions,
+    totalBooks,
+    totalRevenue
+  });
 });
